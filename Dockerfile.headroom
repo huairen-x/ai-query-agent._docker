@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+FROM python:3.11-slim AS headroom
+
+WORKDIR /app
+
+# Install headroom-ai and dependencies
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir headroom-ai>=0.37.0 flask flask-cors pyyaml
+
+# Copy mock upstream server
+COPY mock_upstream_server.py .
+
+EXPOSE 8787 8788 9999
+
+# Default: start both mock upstream and headroom proxy
+COPY docker-headroom-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
