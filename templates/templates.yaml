@@ -1,0 +1,31 @@
+templates:
+  - name: daily_sales_summary
+    pattern: "日销售 汇总 每日"
+    description: "每日销售汇总查询"
+    sql: "SELECT dt, SUM(sale_amount) AS total_amount, SUM(sale_qty) AS total_qty FROM dwd_sale_order_di WHERE dt >= '{{start_date}}' GROUP BY dt ORDER BY dt"
+    variables:
+      - start_date
+    tags:
+      - sales
+      - daily
+
+  - name: top_products
+    pattern: "产品 排名 top 前"
+    description: "产品销量排名 Top-N"
+    sql: "SELECT product_code, product_name, SUM(sale_qty) AS total_qty FROM dwd_sale_order_di GROUP BY product_code, product_name ORDER BY total_qty DESC LIMIT {{limit}}"
+    variables:
+      - limit
+    tags:
+      - products
+      - ranking
+
+  - name: store_comparison
+    pattern: "门店 对比 比较"
+    description: "门店业绩对比"
+    sql: "SELECT store_code, store_name, SUM(sale_amount) AS total_amount FROM dwd_sale_order_di WHERE dt BETWEEN '{{start_date}}' AND '{{end_date}}' GROUP BY store_code, store_name ORDER BY total_amount DESC"
+    variables:
+      - start_date
+      - end_date
+    tags:
+      - stores
+      - comparison
