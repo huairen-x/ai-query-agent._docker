@@ -1,0 +1,146 @@
+graph/nodes/validation.py
+  s_de7494075d50a3::t_35662a6371db80 138,142-151,153-159,161-165
+  s_de7494075d50a3::t_4d3c2b8880d8e0 9
+  s_de7494075d50a3::t_83b198a64dff3a 2-3,6-8,10-59,61-67,69-72,74-76,78-81,83-86,88,91-99,101-104,106-108,110,113,115-116,118-119,121-122,125,127-132,134-136
+  s_de7494075d50a3::t_45860320bddcf6 141,152
+graph/nodes/metadata.py
+  s_de7494075d50a3::t_bda5f463dab81f 11,14
+cache/sqlite_cache.py
+  s_de7494075d50a3::t_f8dedeba3e8ae5 14
+  s_de7494075d50a3::t_0c8c651d28b176 15
+  s_de7494075d50a3::t_b9cd41bd8a4d5f 39
+  s_de7494075d50a3::t_c5b5c46902d6c9 57,60,64
+  s_de7494075d50a3::t_a00820fe011be6 94-102
+  s_de7494075d50a3::t_d5f4742ef3ab5d 119
+graph/nodes/execution.py
+  s_de7494075d50a3::t_39d9227b21b776 13
+  s_de7494075d50a3::t_9662bf3b67a8e3 50-51,53
+  s_de7494075d50a3::t_cf9f80076bc15b 12,16
+middleware/ratelimit.py
+  s_de7494075d50a3::t_696656676fa1b6 2-3,8-9,13-14,16-21,23-27,29-35,38-39,41-52,54-56,58-64,66-70,72-75,78,81-82,84-88,90-92,94,96
+tests/conftest.py
+  s_de7494075d50a3::t_dea7e32585eab8 1-80
+requirements.txt
+  s_de7494075d50a3::t_7752b698fae0e4 1-4
+resilience/degradation.py
+  s_de7494075d50a3::t_80d9ef8e2c6d57 1-71
+.gitignore
+  s_de7494075d50a3::t_84f0ce8eeedf6d 31-37
+graph/nodes/analyze.py
+  s_de7494075d50a3::t_7f53245f166068 9,12
+engine/token_budget.py
+  s_de7494075d50a3::t_e7a6d243589e07 53-60
+.env.example
+  s_de7494075d50a3::t_b0f65d6c4dd442 1-14,17,19-49
+resilience/retry.py
+  s_de7494075d50a3::t_00da8cfae80d81 1-105
+resilience/__init__.py
+  s_de7494075d50a3::t_8154b0eda2e23e 13
+  s_de7494075d50a3::t_65f23de5ff9163 6
+  s_de7494075d50a3::t_5a2d83966a999e 7
+  s_de7494075d50a3::t_296c2e29021da6 1-5,8-11,14
+  s_de7494075d50a3::t_761322aab16459 12
+tests/unit/test_cleanup.py
+  s_de7494075d50a3::t_86d6327fba6b01 1-28,33-46
+  s_de7494075d50a3::t_91389a43a4493c 29-32
+resilience/circuit_breaker.py
+  s_de7494075d50a3::t_7dda5681f5b75b 2-3,8-10,13-16,19-21,24-25,27-69,71-98,100-107,109-155,158-159
+graph/nodes/cleanup.py
+  s_de7494075d50a3::t_5fbd9b1f113ba8 9,12
+observability/tracer.py
+  s_de7494075d50a3::t_237aad5765a1ef 2-3,7-9,11,14-15,18-38,41-42,45,48-50,52-93
+graph/nodes/audit.py
+  s_de7494075d50a3::t_0881b4a600194b 11,14
+tests/benchmark/test_pipeline.py
+  s_de7494075d50a3::t_51cb73c963649a 1-112
+resilience/timesout.py
+  s_de7494075d50a3::t_80601081244736 1
+mcp_http_gateway.py
+  s_de7494075d50a3::t_525d4ad0ec36ea 22
+  s_de7494075d50a3::t_c68d95ab249ce4 14-15
+  s_de7494075d50a3::t_72bdc1acfb62bc 381-382,389-390,409-410,445-446,466-467
+  s_de7494075d50a3::t_d121a27511be64 38-40
+  s_de7494075d50a3::t_d55d9f57f15e04 485-493
+  s_de7494075d50a3::t_db06b5b30693cb 217,219-220,223-226
+  s_de7494075d50a3::t_238e8fbb9a199d 324-368
+  s_de7494075d50a3::t_faf01e89f012db 119,121
+  s_de7494075d50a3::t_8c6bf8e4aab4f1 5,21,28-30,33
+  s_de7494075d50a3::t_476a8907c04601 13
+graph/workflow.py
+  s_de7494075d50a3::t_44086bc3fd9832 6,22-24
+  s_de7494075d50a3::t_bcc581191d1675 90-109,116-140
+  s_de7494075d50a3::t_b825348d36862d 110-115
+  s_de7494075d50a3::t_cf5b22b9dd3274 25
+middleware/cors.py
+  s_de7494075d50a3::t_f5c644ffc13bdb 1-39
+observability/logger.py
+  s_de7494075d50a3::t_936a6bedd7ba0d 1-80
+observability/metrics.py
+  s_de7494075d50a3::t_79236698abce68 190-193
+  s_de7494075d50a3::t_4189e26cb190e6 194-220
+  s_de7494075d50a3::t_b8d9b3e2b9245f 1-189
+compressor/pipeline.py
+  s_de7494075d50a3::t_f45e6fa25e1033 1-264
+middleware/auth.py
+  s_de7494075d50a3::t_cd606c68c273cf 1-36
+resilience/timeout.py
+  s_de7494075d50a3::t_c61a2d28b7db9f 1-52,55-92
+  s_de7494075d50a3::t_94da1e47535710 53-54
+middleware/__init__.py
+  s_de7494075d50a3::t_b834163d9a9962 1-6
+tests/unit/test_token_budget.py
+  s_de7494075d50a3::t_6cbac857c1a4ae 1-101
+db/manager.py
+  s_de7494075d50a3::t_df9b7a97dbdb6d 11,18
+  s_de7494075d50a3::t_041315ed402010 59,61,73,77
+graph/nodes/interpretation.py
+  s_de7494075d50a3::t_6360f9009ef598 9,12
+observability/__init__.py
+  s_de7494075d50a3::t_357e02da2af41c 1-5,13-17,23-24
+  s_de7494075d50a3::t_908725d93e9cbe 6-12,18-22
+cache/__init__.py
+  s_de7494075d50a3::t_d369d521fb26fa 4-5,8-9
+tests/unit/test_pipeline.py
+  s_de7494075d50a3::t_4ccc91e2b4751d 1-191
+graph/nodes/sql_generation.py
+  s_de7494075d50a3::t_4fe7cfef5b5080 9,12
+engine/config.py
+  s_de7494075d50a3::t_f3ede00e11a7b9 241-246
+  s_de7494075d50a3::t_38eb52f2f48885 250-262
+  s_de7494075d50a3::t_a8ac591c768960 175
+  s_de7494075d50a3::t_31ff2605b6c4ff 74-79
+  s_de7494075d50a3::t_9d7c59d690b99e 104-113,173
+  s_de7494075d50a3::t_bff48b9a7437c4 214-234
+  s_de7494075d50a3::t_167bc101220ce9 114-135,174
+  s_de7494075d50a3::t_b36167d70b4676 93-103,172,213,235-239
+  s_de7494075d50a3::t_07e4a20d7695a2 201-212
+  s_de7494075d50a3::t_51ad6a41126b6f 92,136-161
+  s_de7494075d50a3::t_0b71fa4984a93c 240
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "523ca3797d0081d4423a39b9b7a8bcc224477ac8",
+  "prompts": {},
+  "sessions": {
+    "s_de7494075d50a3": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "01a07c30-f442-7e63-9e5d-757d62dcfb3a",
+        "model": "DeepSeek-V4-Flash"
+      },
+      "human_author": "huairen-x <liuhuairen1991@gmail.com>",
+      "custom_attributes": {
+        "runtime_client": "traex-cli",
+        "session_id": "01a07c30-f442-7e63-9e5d-757d62dcfb3a",
+        "edit_kind": "file_edit",
+        "source_scene": "agent",
+        "client_type": "cli",
+        "external_session_id": "01a07c30-f442-7e63-9e5d-757d62dcfb3a",
+        "tool_name": "Edit",
+        "tool_use_id": "call_1a2b666b4116420a9f176220",
+        "operation_id": "call_1a2b666b4116420a9f176220"
+      }
+    }
+  }
+}
