@@ -1,146 +1,165 @@
 """
-Node 5: SQL 审查节点
-安全校验 + 语法检查 + 性能评估
-条件分支：验证失败可重试
+SQL 校验节点 - SQL 注入检测 + 语法校验 + 安全重试
+使用 token 级 SQL 注入检测，避免子串匹配误报
 """
 from __future__ import annotations
-import time
-from graph.state import AgentState
+import re
+import sqlparse
+from typing import Any
+from observability import trace_node, sql_validation_blocked
 
-# SQL 白名单关键字
-SAFE_KEYWORDS = {"select", "show", "describe", "explain", "with", "use"}
-DANGEROUS_KEYWORDS = {"drop", "truncate", "delete", "insert", "update",
-                      "alter", "create", "grant", "revoke", "exec"}
+# SQL 关键字分类
+DDL_KEYWORDS = {"alter", "create", "drop", "truncate", "rename", "replace"}
+DML_DANGEROUS = {"delete", "update", "insert", "load", "merge", "call"}
+EXEC_KEYWORDS = {"exec", "execute", "sp_executesql", "xp_cmdshell", "shell", "exec_at"}
+PRIVILEGE_KEYWORDS = {"grant", "revoke", "deny"}
+TRANSACTION_KEYWORDS = {"commit", "rollback", "savepoint", "begin"}
+ALL_DANGEROUS = DDL_KEYWORDS | DML_DANGEROUS | EXEC_KEYWORDS | PRIVILEGE_KEYWORDS
 
-MAX_RETRY_ATTEMPTS = 2
-
-
-def validation_node(state: AgentState) -> dict:
-    """SQL 审查节点"""
-    start = time.time()
-    sql = state.get("sql", "")
-    attempts = state.get("validation_attempts", 0)
-
-    result = {
-        "sql": sql,
-        "valid": True,
-        "safe": True,
-        "warnings": [],
-        "errors": [],
-    }
-
-    # 1. 安全检查
-    safety = _check_safety(sql)
-    result["safe"] = safety["safe"]
-    result["warnings"].extend(safety["warnings"])
-
-    if not safety["safe"]:
-        result["errors"].append("SQL 安全校验未通过")
-
-    # 2. 语法检查
-    syntax = _check_syntax(sql)
-    if not syntax["valid"]:
-        result["valid"] = False
-        result["errors"].append(syntax["error"])
-
-    # 3. 性能评估
-    performance = _assess_performance(sql)
-    result["warnings"].extend(performance["warnings"])
-
-    validation_passed = result["valid"] and result["safe"]
-
-    return {
-        "validation": result,
-        "validation_passed": validation_passed,
-        "validation_attempts": attempts + 1,
-    }
+# 注释模式（用于剥离后检测）
+COMMENT_PATTERNS = [
+    re.compile(r"--.*$", re.MULTILINE),           # 单行注释
+    re.compile(r"/\*.*?\*/", re.DOTALL),           # 多行注释
+    re.compile(r"#.*$", re.MULTILINE),             # MySQL 单行注释
+]
 
 
-def should_retry_sql(state: AgentState) -> str:
+def strip_comments(sql: str) -> str:
+    """剥离 SQL 中的注释"""
+    cleaned = sql
+    for pattern in COMMENT_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+    return cleaned
+
+
+def extract_tokens(sql: str) -> set[str]:
     """
-    条件分支判断函数
-    验证失败且未超过重试次数 → 返回 "retry" 重新生成 SQL
-    验证通过或超过重试次数 → 返回 "pass"
+    提取 SQL 中的有效 token（只保留完整词，过滤字符串字面量和数字）
+    使用 sqlparse 做词法分析，避免子串匹配
     """
-    validation_passed = state.get("validation_passed", False)
-    attempts = state.get("validation_attempts", 0)
-    errors = state.get("errors", [])
+    cleaned = strip_comments(sql)
+    tokens = set()
+    parsed = sqlparse.parse(cleaned)
+    for statement in parsed:
+        for token in statement.flatten():
+            ttype = token.ttype
+            value = token.value.lower().strip()
+            # 只检查关键字类型的 token
+            if ttype is None or not value:
+                continue
+            ttype_str = str(ttype)
+            if "Keyword" in ttype_str and value:
+                tokens.add(value)
+    return tokens
 
-    if validation_passed:
+
+def check_sql_injection(sql: str) -> tuple[bool, str | None]:
+    """
+    检测 SQL 注入风险
+    返回: (is_safe, error_message)
+
+    检测策略:
+    1. 使用 sqlparse 做词法分析，只检查关键字类型的 token
+    2. 检测联合查询注入 (UNION ... SELECT)
+    3. 检测堆叠查询 (; DROP, ; DELETE 等)
+    """
+    if not sql or not sql.strip():
+        return False, "SQL 语句为空"
+
+    # 检测堆叠查询（多条语句）
+    statements = sqlparse.parse(sql)
+    if len(statements) > 1:
+        return False, "检测到多条 SQL 语句（堆叠查询）"
+
+    # 提取关键字 token 并检查危险操作
+    tokens = extract_tokens(sql)
+    dangerous_found = tokens & ALL_DANGEROUS
+
+    if dangerous_found:
+        # 提取具体哪些危险关键字被命中
+        matched = ", ".join(sorted(dangerous_found))
+        return False, f"检测到禁止的 SQL 操作: {matched}"
+
+    # 检测 UNION SELECT（数据泄露）
+    cleaned = strip_comments(sql).lower()
+    if re.search(r'\bunion\b.*\bselect\b', cleaned, re.DOTALL):
+        return False, "检测到 UNION SELECT 操作（数据泄露风险）"
+
+    return True, None
+
+
+def validate_sql(sql: str) -> tuple[bool, str | None]:
+    """
+    综合 SQL 校验
+    返回: (is_valid, error_message)
+    """
+    # 1. 注入检测
+    safe, error = check_sql_injection(sql)
+    if not safe:
+        return False, error
+
+    # 2. 基本语法检查 - 必须有 SELECT
+    cleaned = strip_comments(sql).strip().lower()
+    if not cleaned.startswith("select"):
+        return False, "只允许 SELECT 查询语句"
+
+    # 3. 检查是否以 ; 结尾，多条语句风险
+    if cleaned.count(";") > 1:
+        return False, "检测到多条 SQL 语句"
+
+    return True, None
+
+
+def should_retry_sql(result: dict[str, Any], retry_count: int, max_retries: int = 3) -> str:
+    """
+    判断是否需要重试 SQL 执行
+    返回: "retry" / "pass" / "force_pass"
+    """
+    if retry_count >= max_retries:
+        return "force_pass"
+
+    error = result.get("error", "")
+    if not error:
         return "pass"
 
-    if attempts < MAX_RETRY_ATTEMPTS:
-        return "retry"
+    error_lower = error.lower()
 
-    # 超过重试次数，记录错误
-    errors.append(f"SQL 审查未通过（已重试 {attempts} 次）")
-    # 强制放行（避免死循环）
-    return "force_pass"
+    # 可重试的错误类型
+    retryable_errors = [
+        "timeout", "time out", "deadlock", "lock wait",
+        "connection", "network", "retry", "too many",
+        "temporary", "transient", "throttl",
+    ]
 
+    for keyword in retryable_errors:
+        if keyword in error_lower:
+            return "retry"
 
-def _check_safety(sql: str) -> dict:
-    """SQL 安全检查"""
-    result = {"safe": True, "warnings": []}
-    sql_lower = sql.strip().lower()
-
-    if not sql_lower:
-        result["safe"] = False
-        result["warnings"].append("SQL 为空")
-        return result
-
-    first_word = sql_lower.split()[0] if sql_lower.split() else ""
-    if first_word not in SAFE_KEYWORDS:
-        result["safe"] = False
-        result["warnings"].append(f"SQL 首关键字 '{first_word}' 不在白名单中")
-
-    for kw in DANGEROUS_KEYWORDS:
-        if kw in sql_lower:
-            result["safe"] = False
-            result["warnings"].append(f"包含危险关键字 '{kw}'")
-
-    if ";" in sql_lower.rstrip(";"):
-        result["safe"] = False
-        result["warnings"].append("SQL 包含多条语句")
-
-    return result
+    return "pass"
 
 
-def _check_syntax(sql: str) -> dict:
-    """SQL 语法检查"""
-    result = {"valid": True, "error": ""}
-    sql_upper = sql.strip().upper()
+@trace_node("validation")
+def validation_node(state: dict) -> dict:
+    """LangGraph 校验节点 - 对生成的 SQL 进行安全性和语法校验"""
+    sql = state.get("sql", "")
+    if not sql:
+        return {**state, "validation_passed": False, "validation_error": "无 SQL 需要校验"}
 
-    if not sql_upper:
-        result["valid"] = False
-        result["error"] = "SQL 为空"
+    safe, inj_error = check_sql_injection(sql)
+    valid, val_error = validate_sql(sql)
 
-    if not sql_upper.startswith("SELECT") and not sql_upper.startswith("WITH"):
-        result["valid"] = False
-        result["error"] = "SQL 必须以 SELECT 或 WITH 开头"
+    if not safe or not valid:
+        sql_validation_blocked.inc()
+        errors = [e for e in [inj_error, val_error] if e]
+        return {
+            **state,
+            "validation_passed": False,
+            "validation_error": "; ".join(errors),
+            "errors": state.get("errors", []) + errors,
+        }
 
-    if sql_upper.count("(") != sql_upper.count(")"):
-        result["valid"] = False
-        result["error"] = "括号不匹配"
-
-    return result
-
-
-def _assess_performance(sql: str) -> dict:
-    """SQL 性能评估"""
-    warnings = []
-    sql_upper = sql.upper()
-
-    if "SELECT" in sql_upper and "WHERE" not in sql_upper and "LIMIT" not in sql_upper:
-        warnings.append("全表扫描：缺少 WHERE 或 LIMIT 条件")
-
-    if "SELECT *" in sql_upper:
-        warnings.append("避免 SELECT *，建议显式指定字段")
-
-    join_count = sql_upper.count("JOIN")
-    if join_count > 3:
-        warnings.append(f"JOIN 数量过多 ({join_count})，可能影响性能")
-
-    if sql_upper.count("SELECT") > 2:
-        warnings.append("包含子查询，考虑使用临时表或 CTE 优化")
-
-    return {"warnings": warnings}
+    return {
+        **state,
+        "validation_passed": True,
+        "validation_error": None,
+    }

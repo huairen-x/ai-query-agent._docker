@@ -6,8 +6,10 @@ from __future__ import annotations
 import time
 from graph.state import AgentState
 from compressor.cleanup import GLOBAL_CONTEXT_CLEANER
+from observability import trace_node
 
 
+@trace_node("cleanup")
 def cleanup_node(state: AgentState) -> dict:
     """上下文清理节点"""
     start = time.time()

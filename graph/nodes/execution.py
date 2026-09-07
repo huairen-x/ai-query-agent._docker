@@ -9,8 +9,11 @@ import random
 from graph.state import AgentState
 from cache.sqlite_cache import GLOBAL_RESULT_CACHE
 from compressor.engine import GLOBAL_HEADROOM
+from observability import trace_node
+from resilience import circuit_breaker, retry
 
 
+@trace_node("execution")
 def execution_node(state: AgentState) -> dict:
     """查询执行节点"""
     start = time.time()
@@ -44,8 +47,10 @@ def execution_node(state: AgentState) -> dict:
     }
 
 
+@circuit_breaker("sql_execution", failure_threshold=5, recovery_timeout=30.0)
+@retry(max_attempts=2, base_delay=0.1, max_delay=1.0)
 def _mock_execute(sql: str, intent: str) -> list[dict]:
-    """Mock 执行 SQL"""
+    """Mock 执行 SQL（带熔断保护 + 重试）"""
     now = time.time()
     rows = []
 

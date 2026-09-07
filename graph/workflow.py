@@ -3,6 +3,7 @@ LangGraph 工作流组装
 将 8 个节点组装为状态机图
 """
 from __future__ import annotations
+import time
 from typing import Literal
 from langgraph.graph import StateGraph, START, END
 
@@ -18,6 +19,10 @@ from graph.nodes import (
     interpretation_node,
     audit_node,
 )
+from engine.config import GLOBAL_CONFIG
+from resilience import timeout_scope, TimeoutError
+from observability import get_logger
+from compressor.pipeline import GLOBAL_CONTEXT_PIPELINE
 
 
 def create_workflow() -> StateGraph:
@@ -80,6 +85,57 @@ def run_workflow(question: str, tenant_id: str = "default") -> dict:
     initial_state = create_initial_state(question, tenant_id)
     result = workflow.invoke(initial_state)
     return result
+
+
+def run_workflow_with_timeout(question: str, tenant_id: str = "default") -> dict:
+    """
+    带超时的工作流执行
+
+    超时时间由 GLOBAL_CONFIG.resilience.workflow_timeout 控制
+    超时时返回部分状态 + 错误信息
+    """
+    timeout_s = GLOBAL_CONFIG.resilience.workflow_timeout if GLOBAL_CONFIG.resilience.timeout_enabled else 0
+    workflow = create_workflow()
+    initial_state = create_initial_state(question, tenant_id)
+
+    logger = get_logger("workflow")
+    logger.info("开始执行工作流", question=question, tenant_id=tenant_id, timeout=timeout_s)
+
+    try:
+        if timeout_s > 0:
+            with timeout_scope(seconds=timeout_s, label="workflow"):
+                result = workflow.invoke(initial_state)
+        else:
+            result = workflow.invoke(initial_state)
+        # 三层上下文处理：L1规则删除 → L2 Headroom压缩 → L3 LLM摘要(默认关闭)
+        result = GLOBAL_CONTEXT_PIPELINE.process(
+            result,
+            workflow_id=question[:32],
+            model="deepseek-flash",
+        )
+        return result
+    except TimeoutError as e:
+        logger.error("工作流执行超时", question=question, timeout=timeout_s)
+        return {
+            "question": question,
+            "tenant_id": tenant_id,
+            "error": f"查询超时（超过 {timeout_s} 秒）",
+            "errors": [f"工作流执行超时（超过 {timeout_s} 秒）"],
+            "status": "timeout",
+            "interpretation": {"summary": f"查询超时，请简化问题后重试", "detail": ""},
+            "chart_suggestion": {"type": "none", "reason": "超时"},
+        }
+    except Exception as e:
+        logger.error("工作流执行失败", question=question, error=str(e))
+        return {
+            "question": question,
+            "tenant_id": tenant_id,
+            "error": f"工作流执行失败: {str(e)}",
+            "errors": [f"工作流执行失败: {str(e)}"],
+            "status": "error",
+            "interpretation": {"summary": "查询处理出错，请重试", "detail": ""},
+            "chart_suggestion": {"type": "none", "reason": "错误"},
+        }
 
 
 # 全局工作流实例

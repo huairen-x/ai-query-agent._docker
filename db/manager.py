@@ -8,12 +8,14 @@ import time
 import json
 from contextlib import contextmanager
 from db.schema import get_db_path, get_connection
+from resilience import circuit_breaker, fallback, RetryableError
 
 
 class DatabaseManager:
     """
     SQLite 数据库管理器
     - 线程安全连接
+    - 熔断保护
     - 自动重试
     - 统计追踪
     """
@@ -54,8 +56,9 @@ class DatabaseManager:
             conn.rollback()
             raise
 
+    @circuit_breaker("sqlite", failure_threshold=5, recovery_timeout=30.0)
     def execute(self, sql: str, params: tuple = None, retries: int = 3) -> sqlite3.Cursor:
-        """执行 SQL（带自动重试）"""
+        """执行 SQL（带熔断保护 + 指数退避重试）"""
         last_error = None
         for attempt in range(retries):
             try:
@@ -67,11 +70,11 @@ class DatabaseManager:
             except sqlite3.OperationalError as e:
                 last_error = e
                 if "locked" in str(e).lower() and attempt < retries - 1:
-                    time.sleep(0.1 * (attempt + 1))
+                    time.sleep(0.1 * (2 ** attempt))
                     continue
                 with self._lock:
                     self._stats["errors"] += 1
-                raise
+                raise RetryableError(str(e)) from e
             except Exception as e:
                 with self._lock:
                     self._stats["errors"] += 1

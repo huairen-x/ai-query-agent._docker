@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 import time
 from graph.state import AgentState
+from observability import trace_node
 
 
+@trace_node("analyze")
 def analyze_node(state: AgentState) -> dict:
     """需求分析节点"""
     start = time.time()

@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 import time
 from graph.state import AgentState
+from observability import trace_node
 
 
+@trace_node("sql_generation")
 def sql_generation_node(state: AgentState) -> dict:
     """SQL 生成节点"""
     start = time.time()

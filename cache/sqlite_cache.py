@@ -11,6 +11,8 @@ from typing import Optional, Any
 from dataclasses import dataclass
 
 from db.manager import GLOBAL_DB_MANAGER
+from observability import cache_hits_total, cache_misses_total, cache_size
+from resilience import fallback
 
 
 @dataclass
@@ -34,6 +36,7 @@ class SQLiteCache:
         self._enabled = True
         self._stats = {"hits": 0, "misses": 0, "evictions": 0}
 
+    @fallback(result=None)
     def get(self, key: str) -> Optional[Any]:
         """获取缓存"""
         if not self._enabled:
@@ -51,11 +54,14 @@ class SQLiteCache:
                     (key,)
                 )
                 self._stats["hits"] += 1
+                cache_hits_total.inc(cache_type=self.table_name)
                 return json.loads(row["data"])
             self._stats["misses"] += 1
+            cache_misses_total.inc(cache_type=self.table_name)
             return None
         except Exception:
             self._stats["misses"] += 1
+            cache_misses_total.inc(cache_type=self.table_name)
             return None
 
     def set(self, key: str, data: Any, ttl: int = None):
@@ -85,6 +91,15 @@ class SQLiteCache:
                 "created_at": now,
                 "expires_at": expires,
             })
+            # 更新缓存大小指标
+            try:
+                row = GLOBAL_DB_MANAGER.fetch_one(
+                    f"SELECT COUNT(*) as cnt FROM {self.table_name}"
+                )
+                if row:
+                    cache_size.set(row["cnt"], cache_type=self.table_name)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -101,6 +116,7 @@ class SQLiteCache:
         """清空缓存"""
         try:
             GLOBAL_DB_MANAGER.execute(f"DELETE FROM {self.table_name}")
+            cache_size.set(0, cache_type=self.table_name)
         except Exception:
             pass
 

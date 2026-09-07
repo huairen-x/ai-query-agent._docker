@@ -8,8 +8,10 @@ import time
 import uuid
 from graph.state import AgentState
 from db.manager import GLOBAL_DB_MANAGER
+from observability import trace_node
 
 
+@trace_node("audit")
 def audit_node(state: AgentState) -> dict:
     """审计记录节点"""
     start = time.time()

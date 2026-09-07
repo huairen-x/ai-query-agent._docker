@@ -2,6 +2,7 @@
 MCP HTTP/SSE Gateway - 企业级智能问数系统
 集成 LangGraph 状态机工作流 + SQLite 持久化缓存 + Headroom 压缩
 """
+from __future__ import annotations
 import json
 import os
 import sys
@@ -9,28 +10,34 @@ import time
 import uuid
 import threading
 from flask import Flask, request, jsonify, Response
-from flask_cors import CORS
+
+# 可观测性
+from observability import get_logger, GLOBAL_METRICS, http_requests_total, http_request_duration_ms, concurrent_requests
 
 # 初始化数据库
 from db.schema import init_db
 init_db()
 
-from graph.workflow import GLOBAL_WORKFLOW
+from engine.config import GLOBAL_CONFIG
+from graph.workflow import GLOBAL_WORKFLOW, run_workflow_with_timeout
 from graph.state import create_initial_state
 from cache.sqlite_cache import GLOBAL_SEMANTIC_CACHE, GLOBAL_METADATA_CACHE, GLOBAL_RESULT_CACHE
 from compressor.cleanup import GLOBAL_CONTEXT_CLEANER
 from compressor.engine import GLOBAL_HEADROOM
 from db.manager import GLOBAL_DB_MANAGER
+from middleware.auth import require_api_key
+from middleware.ratelimit import rate_limit
+from middleware.cors import configure_cors
 
 app = Flask(__name__)
-CORS(app)
+configure_cors(app)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MOCK_MODE = os.environ.get("MOCK_MODE", "true").lower() == "true"
 
-print(f"[Gateway] 企业级智能问数系统启动")
-print(f"[Gateway] Mock 模式: {MOCK_MODE}")
-print(f"[Gateway] 数据库: {os.path.join(BASE_DIR, 'data', 'agent.db')}")
+logger = get_logger("gateway")
+
+logger.info("企业级智能问数系统启动", mock_mode=MOCK_MODE, db_path=os.path.join(BASE_DIR, 'data', 'agent.db'))
 
 # ============================================================
 # 工具定义
@@ -109,9 +116,9 @@ def _handle_ask_question(params: dict) -> dict:
         return {"error": "question 不能为空"}
 
     try:
-        # 运行 LangGraph 工作流
+        # 运行 LangGraph 工作流（带超时保护）
         start = time.time()
-        result = GLOBAL_WORKFLOW.invoke(create_initial_state(question, tenant_id))
+        result = run_workflow_with_timeout(question, tenant_id)
         elapsed = (time.time() - start) * 1000
 
         interpretation = result.get("interpretation", {})
@@ -207,17 +214,16 @@ def _handle_validate_sql(params: dict) -> dict:
     if not sql:
         return {"safe": False, "valid": False, "warnings": ["SQL 为空"], "errors": ["SQL 为空"]}
 
-    from graph.nodes.validation import _check_safety, _check_syntax, _assess_performance
+    from graph.nodes.validation import validate_sql, check_sql_injection
 
-    safety = _check_safety(sql)
-    syntax = _check_syntax(sql)
-    performance = _assess_performance(sql)
+    safe, error = check_sql_injection(sql)
+    valid, val_error = validate_sql(sql)
 
     return {
-        "safe": safety["safe"],
-        "valid": syntax["valid"],
-        "warnings": safety["warnings"] + performance["warnings"],
-        "errors": [] if syntax["valid"] else [syntax["error"]],
+        "safe": safe,
+        "valid": valid,
+        "warnings": [],
+        "errors": [e for e in [error, val_error] if e],
     }
 
 
@@ -315,6 +321,51 @@ TOOL_HANDLERS = {
 # HTTP 路由
 # ============================================================
 
+# 请求级 Metrics 记录
+_request_start_times: dict[int, float] = {}
+
+@app.before_request
+def before_request_metrics():
+    tid = threading.get_ident()
+    _request_start_times[tid] = time.time()
+    if GLOBAL_CONFIG.observability.metrics_enabled:
+        concurrent_requests.inc()
+    # 设置 request_id 到日志上下文
+    rid = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    logger.set_request_id(rid)
+
+
+@app.after_request
+def after_request_metrics(response: Response):
+    tid = threading.get_ident()
+    start = _request_start_times.pop(tid, None)
+    if start and GLOBAL_CONFIG.observability.metrics_enabled:
+        elapsed = (time.time() - start) * 1000
+        http_request_duration_ms.observe(
+            elapsed,
+            method=request.method,
+            endpoint=request.path,
+        )
+        http_requests_total.inc(
+            method=request.method,
+            endpoint=request.path,
+            status=str(response.status_code),
+        )
+        concurrent_requests.dec()
+    return response
+
+
+@app.route("/metrics", methods=["GET"])
+def metrics():
+    """Prometheus metrics 端点"""
+    if not GLOBAL_CONFIG.observability.metrics_enabled:
+        return jsonify({"error": "metrics disabled"}), 404
+    return Response(
+        GLOBAL_METRICS.collect_all(),
+        mimetype="text/plain; version=0.0.4",
+    )
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
@@ -327,12 +378,16 @@ def health():
 
 
 @app.route("/tools", methods=["GET"])
+@require_api_key
+@rate_limit
 def list_tools():
     """列出所有 MCP 工具"""
     return jsonify({"tools": MCP_TOOLS})
 
 
 @app.route("/tools/<tool_name>", methods=["POST"])
+@require_api_key
+@rate_limit
 def call_tool(tool_name):
     """调用 MCP 工具"""
     if tool_name not in TOOL_HANDLERS:
@@ -351,6 +406,8 @@ def call_tool(tool_name):
 
 
 @app.route("/mcp", methods=["POST"])
+@require_api_key
+@rate_limit
 def mcp_endpoint():
     """
     MCP 统一端点
@@ -385,6 +442,8 @@ def mcp_endpoint():
 sse_sessions = {}
 
 @app.route("/sse/ask", methods=["GET"])
+@require_api_key
+@rate_limit
 def sse_ask():
     """SSE 流式问数"""
     sid = str(uuid.uuid4())
@@ -404,6 +463,8 @@ def sse_ask():
 
 
 @app.route("/sse/ask/message", methods=["POST"])
+@require_api_key
+@rate_limit
 def sse_ask_message():
     """SSE 消息端点"""
     body = request.get_json(force=True, silent=True) or {}
@@ -421,11 +482,13 @@ def sse_ask_message():
 if __name__ == "__main__":
     port = int(os.environ.get("MCP_HTTP_PORT", "8080"))
     host = os.environ.get("MCP_HTTP_HOST", "0.0.0.0")
-    print(f"[Gateway] 启动 HTTP 服务: http://{host}:{port}")
-    print(f"[Gateway] 端点列表:")
-    print(f"  Health:     GET  http://{host}:{port}/health")
-    print(f"  Tools:      GET  http://{host}:{port}/tools")
-    print(f"  Tool Call:  POST http://{host}:{port}/tools/<tool_name>")
-    print(f"  MCP:        POST http://{host}:{port}/mcp")
-    print(f"  SSE:        GET  http://{host}:{port}/sse/ask")
+    logger.info("启动 HTTP 服务", host=host, port=port)
+    logger.info("端点列表", endpoints={
+        "health": f"GET http://{host}:{port}/health",
+        "metrics": f"GET http://{host}:{port}/metrics",
+        "tools": f"GET http://{host}:{port}/tools",
+        "tool_call": f"POST http://{host}:{port}/tools/<tool_name>",
+        "mcp": f"POST http://{host}:{port}/mcp",
+        "sse": f"GET http://{host}:{port}/sse/ask",
+    })
     app.run(host=host, port=port, threaded=True)

@@ -28,5 +28,12 @@ tmp/
 temp/
 .trae/
 
+# 测试产物
+.coverage
+benchmark_result.json
+.pytest_cache/
+htmlcov/
+report.html
+
 # 独立子项目
 ops-agent/

@@ -8,8 +8,10 @@ import time
 from graph.state import AgentState
 from cache.sqlite_cache import GLOBAL_METADATA_CACHE
 from compressor.engine import GLOBAL_HEADROOM
+from observability import trace_node
 
 
+@trace_node("metadata")
 def metadata_node(state: AgentState) -> dict:
     """元数据查询节点"""
     start = time.time()

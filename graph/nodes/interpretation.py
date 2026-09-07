@@ -6,8 +6,10 @@ from __future__ import annotations
 import time
 from graph.state import AgentState
 from compressor.engine import GLOBAL_HEADROOM
+from observability import trace_node
 
 
+@trace_node("interpretation")
 def interpretation_node(state: AgentState) -> dict:
     """结果解读节点"""
     start = time.time()

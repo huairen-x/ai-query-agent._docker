@@ -50,6 +50,14 @@ class TokenBudget:
         )
         return self
 
+    def get_threshold_a(self) -> int:
+        """L1 目标阈值：usable = system_prompt + history_context + input_data"""
+        return self.allocations.usable
+
+    def get_threshold_b(self) -> int:
+        """L2 目标阈值：input_data 部分"""
+        return self.allocations.input_data
+
     def get_target_ratio(self, content_type: str, current_tokens: int) -> float:
         """计算需要压缩到的目标比例"""
         if content_type == "system_prompt":
