@@ -6,6 +6,8 @@ from typing import TypedDict, List, Optional, Dict, Any
 import time
 import uuid
 
+import tracing
+
 
 def new_session_id() -> str:
     return str(uuid.uuid4())
@@ -16,6 +18,7 @@ class AgentState(TypedDict, total=False):
     question: str                          # 用户原始问题
     session_id: str                        # 会话 ID
     tenant_id: str                         # 租户 ID
+    trace_id: str                          # 全链路追踪 ID（审计与日志共用）
 
     # ===== 第1步: 上下文清理 =====
     cleanup_result: dict                   # 清理结果统计
@@ -46,6 +49,7 @@ class AgentState(TypedDict, total=False):
     query_result: dict                     # 查询结果
     row_count: int                         # 结果行数
     result_cache_hit: bool                 # 结果缓存是否命中
+    query_elapsed_ms: float                # 查询耗时
 
     # ===== 第7步: 结果解读 =====
     interpretation: dict                   # 结果解读
@@ -53,6 +57,7 @@ class AgentState(TypedDict, total=False):
 
     # ===== 第8步: 审计 =====
     audit_trail: List[dict]                # 审计日志
+    node_timings: Dict[str, dict]          # 各节点真实耗时（由 workflow 包裹器写入）
     cache_hits: Dict[str, int]             # 各缓存命中统计
     errors: List[str]                      # 错误列表
     started_at: float                      # 开始时间戳
@@ -60,12 +65,15 @@ class AgentState(TypedDict, total=False):
     total_latency_ms: float                # 总耗时
 
 
-def create_initial_state(question: str, tenant_id: str = "default") -> AgentState:
-    """创建初始状态"""
+def create_initial_state(
+    question: str, tenant_id: str = "default", trace_id: str | None = None
+) -> AgentState:
+    """创建初始状态；trace_id 缺省时沿用当前上下文（无则新建）"""
     return {
         "question": question,
         "session_id": new_session_id(),
         "tenant_id": tenant_id,
+        "trace_id": trace_id or tracing.current_or_new_trace_id(),
         "intent": "",
         "complexity": "simple",
         "keywords": [],
@@ -83,9 +91,11 @@ def create_initial_state(question: str, tenant_id: str = "default") -> AgentStat
         "query_result": {},
         "row_count": 0,
         "result_cache_hit": False,
+        "query_elapsed_ms": 0.0,
         "interpretation": {},
         "chart_suggestion": {},
         "audit_trail": [],
+        "node_timings": {},
         "cache_hits": {},
         "errors": [],
         "started_at": time.time(),

@@ -38,6 +38,8 @@ def interpretation_node(state: AgentState) -> dict:
         "columns": [c["name"] for c in columns],
     }
 
+    GLOBAL_HEADROOM.compress("interpretation", interpretation)
+
     return {
         "interpretation": interpretation,
         "chart_suggestion": chart,
@@ -78,22 +80,36 @@ def _generate_summary(rows: list, count: int, intent: str) -> dict:
             metrics[f"{col}_min"] = {"value": min_val, "row": min_row}
 
     if intent == "trend":
-        text += f" 数据包含 {count} 个时间周期"
+        # 结果集可能按 dt DESC 返回同一天的多个维度，需按时间列升序后再比较首尾
+        axis = _time_axis(rows)
+        ordered = sorted(rows, key=lambda row: str(row.get(axis, ""))) if axis else list(rows)
+        periods = len({str(row.get(axis)) for row in ordered}) if axis else len(ordered)
+        text += f" 数据包含 {periods} 个时间周期"
 
         if numeric_cols:
-            first_val = rows[0].get(numeric_cols[0], 0) or 0
-            last_val = rows[-1].get(numeric_cols[0], 0) or 0
+            first_val = ordered[0].get(numeric_cols[0], 0) or 0
+            last_val = ordered[-1].get(numeric_cols[0], 0) or 0
             if last_val > first_val:
                 trend = "上升"
             elif last_val < first_val:
                 trend = "下降"
             else:
                 trend = "持平"
-            text += f"，整体趋势{trend}"
-            detail = f"从 {rows[0].get('dt', '')} 到 {rows[-1].get('dt', '')}"
-            if first_val > 0:
-                pct = ((last_val - first_val) / first_val) * 100
-                detail += f"，变化幅度 {pct:+.1f}%"
+
+            if periods <= 1:
+                # 单周期数据没有"趋势"可言，如实报告区间而不是编造变化幅度
+                text += f"，当前仅一个周期（{ordered[0].get(axis, '')}），无法比较趋势"
+                values = [row.get(numeric_cols[0], 0) or 0 for row in ordered]
+                detail = (
+                    f"{numeric_cols[0]} 范围 {min(values)} ~ {max(values)}，"
+                    f"合计 {sum(values)}"
+                )
+            else:
+                text += f"，整体趋势{trend}"
+                detail = f"从 {ordered[0].get(axis, '')} 到 {ordered[-1].get(axis, '')}"
+                if first_val > 0:
+                    pct = ((last_val - first_val) / first_val) * 100
+                    detail += f"，变化幅度 {pct:+.1f}%"
 
     elif intent == "ranking":
         text += f" 排名前 {count} 的数据"
@@ -117,6 +133,24 @@ def _generate_summary(rows: list, count: int, intent: str) -> dict:
                 detail = f"占比最高: {top_name} ({top_pct:.1f}%)"
 
     return {"text": text, "detail": detail, "metrics": metrics}
+
+
+def _time_axis(rows: list) -> str:
+    """找出结果集里的时间列（dt / par_month / date 等），没有则返回空串"""
+    if not rows or not isinstance(rows[0], dict):
+        return ""
+    for candidate in ("dt", "par_month", "date", "month", "day"):
+        if candidate in rows[0]:
+            return candidate
+    for name, value in rows[0].items():
+        if isinstance(value, str) and _looks_like_date(value):
+            return name
+    return ""
+
+
+def _looks_like_date(value: str) -> bool:
+    import re
+    return bool(re.match(r"^\d{4}([-/]\d{1,2}){0,2}", value))
 
 
 def _suggest_chart(intent: str, rows: list, columns: list) -> dict:

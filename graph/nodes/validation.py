@@ -4,8 +4,10 @@ Node 5: SQL 审查节点
 条件分支：验证失败可重试
 """
 from __future__ import annotations
+import re
 import time
 from graph.state import AgentState
+from compressor.engine import GLOBAL_HEADROOM
 
 # SQL 白名单关键字
 SAFE_KEYWORDS = {"select", "show", "describe", "explain", "with", "use"}
@@ -13,6 +15,9 @@ DANGEROUS_KEYWORDS = {"drop", "truncate", "delete", "insert", "update",
                       "alter", "create", "grant", "revoke", "exec"}
 
 MAX_RETRY_ATTEMPTS = 2
+
+# 单引号字符串字面量（SQL 用 '' 转义单引号）
+_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
 
 
 def validation_node(state: AgentState) -> dict:
@@ -48,6 +53,8 @@ def validation_node(state: AgentState) -> dict:
     result["warnings"].extend(performance["warnings"])
 
     validation_passed = result["valid"] and result["safe"]
+
+    GLOBAL_HEADROOM.compress("validation", result)
 
     return {
         "validation": result,
@@ -93,8 +100,11 @@ def _check_safety(sql: str) -> dict:
         result["safe"] = False
         result["warnings"].append(f"SQL 首关键字 '{first_word}' 不在白名单中")
 
+    # 先剥离字符串字面量再按词边界匹配，避免 created_at / 'deleted' 之类误判；
+    # 分号检查仍用未剥离的原文（见下），防止 WHERE x='a';DROP TABLE t 被放过
+    code_only = _STRING_LITERAL_RE.sub("''", sql_lower)
     for kw in DANGEROUS_KEYWORDS:
-        if kw in sql_lower:
+        if re.search(rf"\b{kw}\b", code_only):
             result["safe"] = False
             result["warnings"].append(f"包含危险关键字 '{kw}'")
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=AI Query Agent - Mock LLM Upstream
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/project/ai-query-agent._docker
+EnvironmentFile=%h/.config/ai-query-agent/agent.env
+Environment=PATH=/usr/bin:/bin
+ExecStart=%h/project/ai-query-agent._docker/scripts/run-mock-upstream.sh
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

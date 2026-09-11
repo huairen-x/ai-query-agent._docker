@@ -1,11 +1,11 @@
 """
-Node 1: 上下文清理节点
-在 Headroom 压缩前主动移除无效上下文
+Node 1: 上下文清理节点 - 在 Headroom 压缩前主动移除无效上下文
 """
 from __future__ import annotations
 import time
 from graph.state import AgentState
 from compressor.cleanup import GLOBAL_CONTEXT_CLEANER
+from compressor.engine import GLOBAL_HEADROOM
 
 
 def cleanup_node(state: AgentState) -> dict:
@@ -21,8 +21,10 @@ def cleanup_node(state: AgentState) -> dict:
     # 如果是中文问题，不做 SQL 清理，但可以移除多余空格
     cleaned_question = " ".join(question.split())
 
-    # 记录清理统计
-    return {
+    compressed = GLOBAL_HEADROOM.compress("cleanup", cleaned_question)
+    cleaned_question = compressed.data if GLOBAL_HEADROOM.enabled else cleaned_question
+
+    result = {
         "question": cleaned_question,
         "cleanup_result": {
             "original_length": len(question),
@@ -31,3 +33,7 @@ def cleanup_node(state: AgentState) -> dict:
             "elapsed_ms": (time.time() - start) * 1000,
         },
     }
+
+    GLOBAL_HEADROOM.compress("cleanup_result", result["cleanup_result"])
+
+    return result

@@ -3,11 +3,15 @@ Mock LLM upstream server for headroom proxy
 Echoes back the messages it received so we can extract compressed content
 """
 import json
+import os
 import time
 import uuid
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+HOST = os.environ.get("MOCK_UPSTREAM_HOST", "127.0.0.1")
+PORT = int(os.environ.get("MOCK_UPSTREAM_PORT", "9999"))
 
 
 @app.route("/v1/chat/completions", methods=["POST"])
@@ -49,5 +53,5 @@ def health():
 
 
 if __name__ == "__main__":
-    print("[MockUpstream] Starting on port 9999...")
-    app.run(host="0.0.0.0", port=9999)
+    print(f"[MockUpstream] Starting on {HOST}:{PORT}...")
+    app.run(host=HOST, port=PORT)

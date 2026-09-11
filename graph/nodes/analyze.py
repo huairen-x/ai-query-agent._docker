@@ -1,11 +1,11 @@
 """
-Node 2: 需求分析节点
-分析用户问题，提取意图、复杂度、关键词
+Node 2: 需求分析节点 - 分析用户问题，提取意图、复杂度、关键词
 """
 from __future__ import annotations
 import re
 import time
 from graph.state import AgentState
+from compressor.engine import GLOBAL_HEADROOM
 
 
 def analyze_node(state: AgentState) -> dict:
@@ -24,13 +24,17 @@ def analyze_node(state: AgentState) -> dict:
     # 是否需要元数据
     needs_metadata = _needs_metadata(question)
 
-    return {
+    result = {
         "intent": intent,
         "complexity": complexity,
         "keywords": keywords,
         "business_tags": business_tags,
         "needs_metadata": needs_metadata,
     }
+
+    GLOBAL_HEADROOM.compress("analyze", result)
+
+    return result
 
 
 def _detect_intent(question: str) -> str:

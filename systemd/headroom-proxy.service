@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Query Agent - Headroom Compression Proxy
+After=network-online.target mock-upstream.service
+Wants=mock-upstream.service
+
+[Service]
+WorkingDirectory=%h/project/ai-query-agent._docker
+EnvironmentFile=%h/.config/ai-query-agent/agent.env
+Environment=PATH=/usr/bin:/bin
+ExecStart=%h/project/ai-query-agent._docker/scripts/run-proxy.sh
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

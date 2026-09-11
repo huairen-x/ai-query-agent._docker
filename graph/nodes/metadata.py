@@ -4,10 +4,19 @@ Node 3: 元数据查询节点
 集成 SQLite 缓存
 """
 from __future__ import annotations
+import os
+import re
 import time
 from graph.state import AgentState
 from cache.sqlite_cache import GLOBAL_METADATA_CACHE
 from compressor.engine import GLOBAL_HEADROOM
+from datasource.mock_warehouse import CATALOG, GLOBAL_WAREHOUSE, WarehouseError
+
+# 表名 + 注释组成的检索底表，只构建一次
+_TABLE_HAYSTACK = {
+    name: f"{name} {table['comment']}".lower()
+    for name, table in CATALOG.items()
+}
 
 
 def metadata_node(state: AgentState) -> dict:
@@ -15,12 +24,11 @@ def metadata_node(state: AgentState) -> dict:
     start = time.time()
     question = state.get("question", "")
     keywords = state.get("keywords", [])
-    intent = state.get("intent", "general")
 
     # 1. 搜索相关表
     related_tables = _search_tables(question, keywords)
 
-    # 2. 查询表元数据
+    # 2. 查询表元数据（带缓存）
     metadata_info = {}
     metadata_cache_hit = False
 
@@ -30,74 +38,69 @@ def metadata_node(state: AgentState) -> dict:
         if cached:
             metadata_info[table_name] = cached
             metadata_cache_hit = True
-        else:
-            meta = _mock_describe_table(table_name)
-            GLOBAL_METADATA_CACHE.set(meta, "describe_table", table_name=table_name)
-            metadata_info[table_name] = meta
+            continue
+        try:
+            meta = GLOBAL_WAREHOUSE.describe(table_name)
+        except WarehouseError as exc:
+            print(f"[node:metadata] describe {table_name} FAIL {exc}", flush=True)
+            continue
+        GLOBAL_METADATA_CACHE.set(meta, "describe_table", table_name=table_name)
+        metadata_info[table_name] = meta
 
     # 3. 压缩元数据
+    if os.environ.get("HEADROOM_DEBUG", "true").lower() == "true":
+        print(f"[node:metadata] compress input tables={len(metadata_info)}", flush=True)
     compressed = GLOBAL_HEADROOM.compress("metadata", metadata_info, context={"question": question})
+    if os.environ.get("HEADROOM_DEBUG", "true").lower() == "true":
+        print(f"[node:metadata] compress ratio={compressed.ratio} saved={compressed.tokens_saved} strat={compressed.strategy}", flush=True)
 
     return {
         "metadata": compressed.data if GLOBAL_HEADROOM.enabled else metadata_info,
         "metadata_cache_hit": metadata_cache_hit,
         "related_tables": related_tables,
+        "cache_hits": _bump(state, "metadata_cache") if metadata_cache_hit else state.get("cache_hits", {}),
     }
+
+
+def _bump(state: AgentState, name: str) -> dict:
+    """累加 cache_hits，LangGraph 的 key 是整体替换，必须返回完整字典"""
+    hits = dict(state.get("cache_hits", {}))
+    hits[name] = hits.get(name, 0) + 1
+    return hits
 
 
 def _search_tables(question: str, keywords: list) -> list:
-    """搜索相关表"""
-    # Mock 数据
-    all_tables = [
-        {"table_name": "dwd_sale_order_di", "comment": "销售订单明细"},
-        {"table_name": "dwd_sale_order_item_di", "comment": "销售订单行项目"},
-        {"table_name": "dim_product_df", "comment": "产品维度表"},
-        {"table_name": "dim_store_df", "comment": "门店维度表"},
-        {"table_name": "dwd_traffic_visit_di", "comment": "到店流量明细"},
-        {"table_name": "dwd_customer_visit_di", "comment": "客户到访明细"},
+    """
+    按问题/关键词与「表名 + 表注释」的字符重合度排序选表。
+
+    中文问题经 analyze 分词后往往是一整段（如 "查询最近"），朴素子串匹配会全军覆没，
+    因此这里用 2-gram 重合度打分："到店量趋势" → "到店" 命中 dwd_traffic_visit_di。
+    """
+    grams = _grams(question)
+    for keyword in keywords:
+        grams |= _grams(str(keyword))
+
+    scored = []
+    for table_name, haystack in _TABLE_HAYSTACK.items():
+        score = sum(1 for gram in grams if gram in haystack)
+        if score:
+            scored.append((score, table_name))
+
+    if not scored:
+        return GLOBAL_WAREHOUSE.list_tables()[:3]
+
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [
+        {"table_name": name, "comment": CATALOG[name]["comment"]}
+        for _score, name in scored[:5]
     ]
 
-    q = question.lower()
-    matched = []
-    for t in all_tables:
-        name = t["table_name"].lower()
-        comment = t["comment"].lower()
-        # 匹配表名或注释
-        if any(kw.lower() in name or kw.lower() in comment for kw in keywords):
-            matched.append(t)
-        # 特殊匹配
-        if "到店" in q and ("traffic" in name or "visit" in name or "customer" in name):
-            if t not in matched:
-                matched.append(t)
-        if "销售" in q or "金额" in q or "订单" in q:
-            if "sale" in name or "order" in name:
-                if t not in matched:
-                    matched.append(t)
 
-    return matched[:5] if matched else all_tables[:3]
-
-
-def _mock_describe_table(table_name: str) -> dict:
-    """模拟描述表结构"""
-    return {
-        "table_name": table_name,
-        "columns": [
-            {"name": "id", "type": "bigint", "comment": "主键ID"},
-            {"name": "dt", "type": "string", "comment": "分区日期"},
-            {"name": "par_month", "type": "string", "comment": "分区月份"},
-            {"name": "sale_amount", "type": "decimal(18,2)", "comment": "销售金额"},
-            {"name": "sale_qty", "type": "int", "comment": "销售数量"},
-            {"name": "product_code", "type": "string", "comment": "产品编码"},
-            {"name": "product_name", "type": "string", "comment": "产品名称"},
-            {"name": "store_code", "type": "string", "comment": "门店编码"},
-            {"name": "store_name", "type": "string", "comment": "门店名称"},
-            {"name": "region", "type": "string", "comment": "区域"},
-            {"name": "visit_count", "type": "int", "comment": "到店数量"},
-            {"name": "customer_count", "type": "int", "comment": "客户数量"},
-            {"name": "create_time", "type": "timestamp", "comment": "创建时间"},
-            {"name": "update_time", "type": "timestamp", "comment": "更新时间"},
-        ],
-        "partition_keys": ["dt", "par_month"],
-        "table_type": "MANAGED_TABLE",
-        "total_size_gb": 12.5,
-    }
+def _grams(text: str) -> set[str]:
+    """中文取 2-gram，英文/数字取长度 ≥2 的词"""
+    grams = set(re.findall(r"[a-zA-Z_]\w{1,}", text.lower()))
+    cn_runs = re.findall(r"[\u4e00-\u9fff]+", text)
+    for run in cn_runs:
+        grams.update(run[i:i + 2] for i in range(len(run) - 1))
+        grams.add(run)
+    return grams
